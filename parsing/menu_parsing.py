@@ -180,8 +180,9 @@ CONTAINER_NAME = "dammian-mask-menus"
 
 def _delete_menu_metadata(menu_source_identifier: str) -> None:
     menu_hash = hash_menu_contents(menu_source_identifier=menu_source_identifier)
+    blob_name = menu_hash + ".json"
     container = _get_container_client(container_name=CONTAINER_NAME)
-    blob = container.get_blob_client(blob=menu_hash + ".json")
+    blob = container.get_blob_client(blob=blob_name)
     blob.delete_blob()
     print(f"Deleted data for {menu_source_identifier}")
 
@@ -191,7 +192,9 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
     menu_id = get_menu_id(menu_source_identifier=menu_source_identifier)
 
     container = _get_container_client(container_name=CONTAINER_NAME)
-    blob = container.get_blob_client(blob=menu_id + ".json")
+
+    blob_name = menu_hash + ".json"
+    blob = container.get_blob_client(blob=blob_name)
 
     menu_exists = blob.exists()
 
@@ -211,7 +214,6 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
         "menu_hash": menu_hash,
         "is_valid_menu": None,
         "status": "PARSING",
-        "menu_id": menu_id,
     }
     blob.upload_blob(
         data=json.dumps(pre_parsing_menu_contents_metadata, indent=4), overwrite=True
@@ -226,7 +228,6 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
         "menu_hash": menu_hash,
         "is_valid_menu": contents_are_valid,
         "status": "COMPLETED",
-        "menu_id": menu_id,
     }
     blob.upload_blob(data=json.dumps(menu_contents_metadata, indent=4), overwrite=True)
     print(f"Uploaded contents for {menu_source_identifier}")

@@ -3,4 +3,4 @@
   bun run build
 )
 
-cp dammian-mask-frontend/dist/ ./backend/app/frontend_dist -r
+cp -r dammian-mask-frontend/dist/ ./backend/app/frontend_dist
