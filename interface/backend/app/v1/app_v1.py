@@ -96,14 +96,14 @@ def get_menu_contents_status():
 
     if not blob.exists():
         # TODO: launch parsing job
-        response_data = {"status": "PARSING"}
+        response_data = {"status": "PARSING", "menu_hash": menu_hash}
     else:
         blob_data = json.loads(blob.download_blob().readall().decode("utf-8"))
         is_valid_menu = blob_data.get("is_valid_menu")
         if is_valid_menu:
-            response_data = {"status": "COMPLETE"}
+            response_data = {"status": "COMPLETE", "menu_hash": menu_hash}
         else:
-            response_data = {"status": "INVALID_MENU"}
+            response_data = {"status": "INVALID_MENU", "menu_hash": menu_hash}
 
     return jsonify(response_data)
 
@@ -111,10 +111,10 @@ def get_menu_contents_status():
 @bp.route("/menu-speak")
 def menu_speak():
     user_message = request.args.get("user_message")
-    menu_source = request.args.get("menu_source")
+    menu_hash = request.args.get("menu_hash")
     session_id = request.args.get("session_id")
 
-    required_args = ["user_message", "menu_source", "session_id"]
+    required_args = ["user_message", "menu_hash", "session_id"]
 
     for a in required_args:
         if not a:
