@@ -1,0 +1,6 @@
+flask
+gunicorn
+flask-cors
+azure-identity
+azure-storage-blob
+python-dotenv

@@ -1,0 +1,11 @@
+**/.DS_Store
+**/node_modules
+**/.next
+**/.git
+**/Dockerfile
+**/docker-compose*.yml
+**/.env*
+**/npm-debug.log
+**/docs
+**/.vscode
+**/.github
