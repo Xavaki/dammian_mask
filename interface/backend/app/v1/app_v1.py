@@ -101,7 +101,7 @@ def get_menu_contents_status():
         blob_data = json.loads(blob.download_blob().readall().decode("utf-8"))
         is_valid_menu = blob_data.get("is_valid_menu")
         if is_valid_menu:
-            response_data = {"status": "COMPLETE", "menu_hash": menu_hash}
+            response_data = {"status": "COMPLETED", "menu_hash": menu_hash}
         else:
             response_data = {"status": "INVALID_MENU", "menu_hash": menu_hash}
 
