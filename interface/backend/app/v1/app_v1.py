@@ -72,6 +72,7 @@ def get_menu_contents():
 
 @bp.route("/menu-speak")
 def menu_speak():
+    print("HEY")
     user_message = request.args.get("user_message")
     menu_source = request.args.get("menu_source")
 
@@ -87,9 +88,13 @@ def menu_speak():
     @stream_with_context
     def speak_wrapper():
         count = 0
-        for response_chunk in oc.stream(message=user_message):
-            payload = {"index": count, "message": response_chunk}
-            yield json.dumps(payload) + "\n"
-            count += 1
+        try:
+            for response_chunk in oc.stream(message=user_message):
+                payload = {"id": count, "message_chunk": response_chunk}
+                yield json.dumps(payload) + "\n"
+                count += 1
+            yield json.dumps({"id": "END", "message_chunk": None}) + "\n"
+        except:
+            yield json.dumps({"id": "BACKEND-ERROR", "message_chunk": None})
 
     return Response(speak_wrapper(), mimetype="application/x-ndjson")
