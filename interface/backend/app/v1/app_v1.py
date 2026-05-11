@@ -85,6 +85,7 @@ def get_menu_contents_status():
     menu_hash = request.args.get("menu_hash")
 
     if not menu_hash:
+        print("Generating menu hash...")
         menu_source = request.args.get("menu_source")
         if not menu_source:
             return make_response(
