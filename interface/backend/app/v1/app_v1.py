@@ -82,15 +82,22 @@ bp = Blueprint("v1", __name__, url_prefix="/api")
 
 @bp.route("/get-menu-contents-status", methods=["GET"])
 def get_menu_contents_status():
-    menu_source = request.args.get("menu_source")
-    if not menu_source:
-        return make_response(
-            jsonify({"error": "Missing 'menu_source' query parameter"}), 400
-        )
+    menu_hash = request.args.get("menu_hash")
+
+    if not menu_hash:
+        menu_source = request.args.get("menu_source")
+        if not menu_source:
+            return make_response(
+                jsonify(
+                    {"error": "Missing 'menu_source' or 'menu_hash' query parameter"}
+                ),
+                400,
+            )
+
+        menu_hash = hash_menu_contents(menu_source_identifier=menu_source)
 
     CONTAINER_NAME = "dammian-mask-menus"
     container = _get_container_client(container_name=CONTAINER_NAME)
-    menu_hash = hash_menu_contents(menu_source_identifier=menu_source)
     blob_name = menu_hash + ".json"
     blob = container.get_blob_client(blob=blob_name)
 
