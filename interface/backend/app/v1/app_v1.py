@@ -78,6 +78,9 @@ bp = Blueprint("v1", __name__, url_prefix="/api")
 # def hello_world():
 #     container = storage_account.get_container_client("api-misc")
 #     return jsonify({"message": "Hello, World!"})
+#
+#
+#
 
 
 @bp.route("/get-menu-contents-status", methods=["GET"])
@@ -96,6 +99,13 @@ def get_menu_contents_status():
             )
 
         menu_hash = hash_menu_contents(menu_source_identifier=menu_source)
+
+    headers = request.headers
+    for k, v in headers.items():
+        print(f"{k}:{v}")
+    browser_language = request.accept_languages.best
+    browser_language_code = browser_language.split("-")[0] if browser_language else "es"
+    print(browser_language_code)
 
     CONTAINER_NAME = "dammian-mask-menus"
     container = _get_container_client(container_name=CONTAINER_NAME)
@@ -128,6 +138,16 @@ def menu_speak():
         if not a:
             return make_response(jsonify({"error": "Missing parameters"}), 400)
 
+    CONTAINER_NAME = "dammian-mask-menus"
+    container = _get_container_client(container_name=CONTAINER_NAME)
+    blob_name = menu_hash + ".json"
+    blob = container.get_blob_client(blob=blob_name)
+    assert blob.exists()
+
+    menu_contents = json.loads(blob.download_blob().readall().decode("utf-8")).get(
+        "menu_content"
+    )
+
     oc = OpenaiCaller(
         deployment_name="recepcionista",
         system_prompt="Eres un asistente virtual. Ayuda al usuario en todo lo que te pida",
@@ -143,6 +163,6 @@ def menu_speak():
                 count += 1
             yield json.dumps({"id": "END", "message_chunk": None}) + "\n"
         except:
-            yield json.dumps({"id": "BACKEND-ERROR", "message_chunk": None})
+            yield json.dumps({"id": "BACKEND-ERROR", "message_chunk": None}) + "\n"
 
     return Response(speak_wrapper(), mimetype="application/x-ndjson")
