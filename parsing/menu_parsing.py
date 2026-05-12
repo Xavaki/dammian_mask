@@ -1,6 +1,12 @@
 import requests
 import hashlib
+from azure.storage.blob import ContentSettings
+import json
+import os
+import requests
+from datetime import datetime
 
+from storage_utils import _get_container_client
 from llm_client import OpenaiCaller
 
 
@@ -102,35 +108,6 @@ def get_menu_id(menu_source_identifier: str) -> str:
     return menu_source_identifier.replace("/", "***")
 
 
-from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient, ContentSettings
-import json
-import os
-
-credential = DefaultAzureCredential()
-
-
-def _blob_service_client() -> BlobServiceClient:
-    resource_url = os.getenv("STORAGE_ACCOUNT_RESOURCE_URL")
-    assert resource_url is not None, (
-        "Storage account must be specified by setting STORAGE_ACCOUNT_RESOURCE_URL environment variable."
-    )
-    return BlobServiceClient(account_url=resource_url, credential=credential)
-
-
-def _get_container_client(container_name: str):
-    service = _blob_service_client()
-    container = service.get_container_client(container_name)
-    if not container.exists():
-        print(f"Container {container_name} does not exist. Creating it.")
-        container.create_container()
-    return container
-
-
-import requests
-from datetime import datetime
-
-
 class MenuParser:
     def __init__(self, menu_source_identifier) -> None:
         self.is_pdf = _is_pdf(menu_source_identifier)
@@ -181,7 +158,7 @@ CONTAINER_NAME = "dammian-mask-menus"
 
 def _delete_menu_metadata(menu_source_identifier: str) -> None:
     menu_hash = hash_menu_contents(menu_source_identifier=menu_source_identifier)
-    blob_name = menu_hash + ".json"
+    blob_name = menu_hash + "/contents.json"
     container = _get_container_client(container_name=CONTAINER_NAME)
     blob = container.get_blob_client(blob=blob_name)
     blob.delete_blob()
@@ -194,7 +171,7 @@ def _upload_document(menu_hash: str, menu_source_identifier: str) -> None:
         filext = ".pdf"
         content_settings = ContentSettings(content_type="application/pdf")
     else:
-        raise WebsiteUrlError
+        return
     document_blob_name = menu_hash + "/document" + filext
     document_blob = container.get_blob_client(blob=document_blob_name)
     resp = requests.get(menu_source_identifier)
@@ -224,7 +201,7 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
             return data
         print("Overwrite is set to True. Overwritting.")
 
-    # WE DO THIS TO AVOID SIMULTANEOUS PARSING OF THE SAME DATA
+    # THIS AVOIDS SIMULTANEOUS PARSING OF THE SAME DATA
     pre_parsing_menu_contents_metadata = {
         "menu_content": None,
         "timestamp": None,
@@ -239,14 +216,21 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
     _upload_document(menu_hash, menu_source_identifier)
 
     menu_parser = MenuParser(menu_source_identifier=menu_source_identifier)
-    menu_contents, contents_are_valid = menu_parser.parse()
+    try:
+        menu_contents, contents_are_valid = menu_parser.parse()
+        status = "COMPLETED"
+    except WebsiteUrlError:
+        menu_contents = None
+        contents_are_valid = None
+        status = "UNKNOWN"
     menu_contents_metadata = {
         "menu_content": menu_contents,
         "timestamp": str(datetime.now()),
         "menu_source_identifier": menu_source_identifier,
         "menu_hash": menu_hash,
         "is_valid_menu": contents_are_valid,
-        "status": "COMPLETED",
+        "status": status,
+        "document_type": "pdf" if _is_pdf(menu_source_identifier) else "website",
     }
     blob.upload_blob(data=json.dumps(menu_contents_metadata, indent=4), overwrite=True)
     print(f"Uploaded contents for {menu_source_identifier}")
@@ -260,6 +244,9 @@ def _get_menu_contents(menu_source_identifier: str, overwrite: bool) -> dict:
     if menu_contents_metadata["status"] == "PARSING":
         raise MenuParsingInProgress
 
+    if menu_contents_metadata["document_type"] == "website":
+        raise WebsiteUrlError
+
     if not menu_contents_metadata["is_valid_menu"]:
         raise InvalidMenuContentsError
 
@@ -269,8 +256,6 @@ def _get_menu_contents(menu_source_identifier: str, overwrite: bool) -> dict:
 def get_menu_contents_main(
     menu_source_identifier: str, overwrite: bool = False
 ) -> dict:
-    if not _is_pdf(menu_source_identifier=menu_source_identifier):
-        raise WebsiteUrlError("Website menu not supported yet")
     contents = _get_menu_contents(
         menu_source_identifier=menu_source_identifier, overwrite=overwrite
     )

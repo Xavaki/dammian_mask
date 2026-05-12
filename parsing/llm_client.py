@@ -5,6 +5,10 @@ from typing import Dict, Any, Union
 import json
 import requests
 
+from storage_utils import _get_container_client
+
+import hashlib
+
 
 # class OpenaiClient:
 #     model_type = "azure_openai"
@@ -99,12 +103,12 @@ import requests
 #         return response_message_raw, metadata
 
 
-import os
-
-
 class OpenaiCaller:
     def __init__(
-        self, deployment_name: str, system_prompt: str, output_schema: dict
+        self,
+        deployment_name: str,
+        system_prompt: str,
+        output_schema: dict | None = None,
     ) -> None:
         self.deployment_name = deployment_name
         self.system_prompt = system_prompt
@@ -117,18 +121,16 @@ class OpenaiCaller:
     def __call__(self, message: str) -> str:
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": message},
-        ]
+        ] + [message]
 
-        payload = {
-            **{
-                "messages": messages,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": self.output_schema,
-                },
-            },
-        }
+        payload_args = {"messages": messages, "stream": True}
+        if self.output_schema:
+            payload_args["response_format"] = {
+                "type": "json_schema",
+                "json_schema": self.output_schema,
+            }
+
+        payload = {**payload_args}
 
         url = f"{self.ENDPOINT}/openai/deployments/{self.deployment_name}/chat/completions?api-version={self.API_VERSION}"
         r = requests.post(
@@ -141,3 +143,20 @@ class OpenaiCaller:
         response = r.json()
         response_message_raw = response["choices"][0]["message"]["content"]
         return response_message_raw
+
+
+class PdfMenuParser:
+    system_prompt = """Eres un experto en parsear PDFs. A partir del siguiente menu, extrae toda la información que consideres relevante para el comensal del restaurante, en formato JSON.Responde solo con el JSON en cuestión, no añadas texto irrelevante a la tarea."""
+    deployment = "gpt-5.4"
+
+    def __init__(self, pdf_source_url: str) -> None:
+        self.pdf_source_url = pdf_source_url
+        self.llm_caller = OpenaiCaller(
+            deployment_name=self.deployment, system_prompt=self.system_prompt
+        )
+
+    def save_prompt(self):
+        system_prompt_hashed = hashlib.sha256(self.system_prompt).hexdigest()
+        container = _get_container_client(container_name)
+
+    def parse_menu_contents(self) -> str: ...
