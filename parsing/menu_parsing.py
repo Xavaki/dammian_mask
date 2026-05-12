@@ -47,12 +47,13 @@ def validate_menu_contents(contents: str) -> bool:
     n_retries = 3
     for _ in range(n_retries):
         try:
-            raw_resp = llm_caller(contents)
+            message = {"role": "user", "content": contents}
+            raw_resp = llm_caller(message)
             resp = json.loads(raw_resp)
             return resp.get("is_menu")
         except json.JSONDecodeError:
             print(
-                f"JSON decoding failed for menu content validation. Retring (max={n_retries}"
+                f"JSON decoding failed for menu content validation. Retrying (max={n_retries}"
             )
             pass
 
@@ -102,7 +103,7 @@ def get_menu_id(menu_source_identifier: str) -> str:
 
 
 from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, ContentSettings
 import json
 import os
 
@@ -187,14 +188,31 @@ def _delete_menu_metadata(menu_source_identifier: str) -> None:
     print(f"Deleted data for {menu_source_identifier}")
 
 
+def _upload_document(menu_hash: str, menu_source_identifier: str) -> None:
+    container = _get_container_client(container_name=CONTAINER_NAME)
+    if _is_pdf(menu_source_identifier):
+        filext = ".pdf"
+        content_settings = ContentSettings(content_type="application/pdf")
+    else:
+        raise WebsiteUrlError
+    document_blob_name = menu_hash + "/document" + filext
+    document_blob = container.get_blob_client(blob=document_blob_name)
+    resp = requests.get(menu_source_identifier)
+    document_bytes = resp.content
+    document_blob.upload_blob(
+        document_bytes, overwrite=True, content_settings=content_settings
+    )
+    print("Document uploaded!")
+
+
 def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) -> dict:
     menu_hash = hash_menu_contents(menu_source_identifier=menu_source_identifier)
     menu_id = get_menu_id(menu_source_identifier=menu_source_identifier)
 
     container = _get_container_client(container_name=CONTAINER_NAME)
 
-    blob_name = menu_hash + ".json"
-    blob = container.get_blob_client(blob=blob_name)
+    contents_blob_name = menu_hash + "/contents.json"
+    blob = container.get_blob_client(blob=contents_blob_name)
 
     menu_exists = blob.exists()
 
@@ -218,6 +236,7 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
     blob.upload_blob(
         data=json.dumps(pre_parsing_menu_contents_metadata, indent=4), overwrite=True
     )
+    _upload_document(menu_hash, menu_source_identifier)
 
     menu_parser = MenuParser(menu_source_identifier=menu_source_identifier)
     menu_contents, contents_are_valid = menu_parser.parse()
@@ -270,7 +289,7 @@ if __name__ == "__main__":
     pandas_url = "https://pandas.pydata.org/Pandas_Cheat_Sheet.pdf"
 
     try:
-        contents = get_menu_contents_main(pdfurl, overwrite=False)
+        contents = get_menu_contents_main(pdfurl, overwrite=True)
     except CustomException as e:
         print(e.error_message)
     embed()
