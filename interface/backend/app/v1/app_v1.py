@@ -109,7 +109,7 @@ def get_menu_contents_status():
 
     CONTAINER_NAME = "dammian-mask-menus"
     container = _get_container_client(container_name=CONTAINER_NAME)
-    blob_name = menu_hash + ".json"
+    blob_name = menu_hash + "/contents.json"
     blob = container.get_blob_client(blob=blob_name)
 
     if not blob.exists():
