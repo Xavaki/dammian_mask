@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 
 from storage_utils import _get_container_client
-from llm_utils import OpenaiCaller, PdfMenuParser, ContentValidator
+from llm_utils import OpenaiCaller, PdfMenuParser, ContentValidator, UiOptionsGenerator
 
 
 class CustomException(Exception):
@@ -79,6 +79,7 @@ class MenuParser:
         self.is_pdf = _is_pdf(menu_source_identifier)
         self.menu_source_identifier = menu_source_identifier
         print(f"PARSING {self.menu_source_identifier}")
+        self.llm_calls_metadata = {}
 
     def _get_contents_jina(self) -> str:
         print("Getting menu contents with jina...")
@@ -87,17 +88,22 @@ class MenuParser:
         response.raise_for_status()
         return response.text
 
-    def _parse_pdf(self) -> dict:
+    def _parse_pdf(self) -> str:
         parser = PdfMenuParser(pdf_source_url=self.menu_source_identifier)
-        return parser.parse_menu_contents()
+        parsed_contents, parser_metadata = parser.parse_menu_contents()
+        self.llm_calls_metadata["pdf-parser"] = parser_metadata
+        return parsed_contents
 
-    def _parse_website(self) -> dict:
+    def _parse_website(self) -> str:
         raise WebsiteUrlError("Website menu not supported yet")
 
     def _validate_contents(self) -> bool:
         contents_str = self._get_contents_jina()
         content_validator = ContentValidator()
-        is_valid_menu = content_validator.validate_contents(contents=contents_str)
+        is_valid_menu, content_validation_metadata = (
+            content_validator.validate_contents(contents=contents_str)
+        )
+        self.llm_calls_metadata["content-validation"] = content_validation_metadata
         if is_valid_menu:
             print("Contents valid!")
         else:
@@ -105,19 +111,27 @@ class MenuParser:
 
         return is_valid_menu
 
-    def parse(self) -> tuple[dict, bool]:
+    def parse(self) -> tuple[bool, str | None, str | None]:
         valid_contents = self._validate_contents()
 
         contents = None
+        ui_options = None
         if valid_contents:
             if self.is_pdf:
                 contents = self._parse_pdf()
             else:
                 contents = self._parse_website()
 
+            if contents:
+                options_generator = UiOptionsGenerator()
+                ui_options, ui_options_metadata = options_generator.generate(
+                    contents=contents
+                )
+                self.llm_calls_metadata["ui-options"] = ui_options_metadata
+
             print("Contents parsed!")
 
-        return contents, valid_contents
+        return valid_contents, contents, ui_options
 
 
 CONTAINER_NAME = "dammian-mask-menus"
@@ -181,35 +195,40 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
         "is_valid_menu": None,
         "status": "PARSING",
         "document_type": document_type,
+        "llm_calls_metadata": None,
     }
+    # upload data
     blob.upload_blob(
         data=json.dumps(pre_parsing_menu_contents_metadata, indent=4), overwrite=True
     )
+    # upload menu document
     _upload_document(menu_hash, menu_source_identifier)
 
     try:
-        menu_contents, contents_are_valid = menu_parser.parse()
+        (contents_are_valid, menu_contents, ui_options) = menu_parser.parse()
         status = "COMPLETED"
     except WebsiteUrlError:
         menu_contents = None
         contents_are_valid = None
+        ui_options = None
         status = "UNKNOWN"
 
     menu_contents_metadata = {
-        "menu_data": menu_contents,
+        "menu_data": {"menu_content": menu_contents, "ui_options": ui_options},
         "timestamp": str(datetime.now()),
         "menu_source_identifier": menu_source_identifier,
         "menu_hash": menu_hash,
         "is_valid_menu": contents_are_valid,
         "status": status,
         "document_type": document_type,
+        "llm_calls_metadata": menu_parser.llm_calls_metadata,
     }
     blob.upload_blob(data=json.dumps(menu_contents_metadata, indent=4), overwrite=True)
     print(f"Uploaded contents for {menu_source_identifier}")
     return menu_contents_metadata
 
 
-def _get_menu_contents(menu_source_identifier: str, overwrite: bool) -> dict:
+def get_menu_data(menu_source_identifier: str, overwrite: bool) -> dict:
     menu_contents_metadata = _get_menu_contents_metadata(
         menu_source_identifier=menu_source_identifier, overwrite=overwrite
     )
@@ -222,16 +241,7 @@ def _get_menu_contents(menu_source_identifier: str, overwrite: bool) -> dict:
     if not menu_contents_metadata["is_valid_menu"]:
         raise InvalidMenuContentsError
 
-    return menu_contents_metadata["menu_data"]["menu_content"]
-
-
-def get_menu_contents_main(
-    menu_source_identifier: str, overwrite: bool = False
-) -> dict:
-    contents = _get_menu_contents(
-        menu_source_identifier=menu_source_identifier, overwrite=overwrite
-    )
-    return contents
+    return menu_contents_metadata["menu_data"]
 
 
 from dotenv import load_dotenv
@@ -247,7 +257,7 @@ if __name__ == "__main__":
     pandas_url = "https://pandas.pydata.org/Pandas_Cheat_Sheet.pdf"
 
     try:
-        contents = get_menu_contents_main(pdfurl, overwrite=True)
+        menu_data = get_menu_data(pdfurl, overwrite=True)
     except CustomException as e:
         print(e.error_message)
 

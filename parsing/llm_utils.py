@@ -123,12 +123,93 @@ class PromptUser:
         blob.upload_blob(data=json.dumps(data, indent=2), overwrite=True)
 
 
+class UiOptionsGenerator(PromptUser):
+    system_prompt = "You're part of a system designed to extract information from a restaurant menu in order to use it in a digital menu app. The chat interface will have 3 default message options that will help communicate to the user how to use the chat. Your specific task consists on, given the contents of a restaurant menu, come up with the default questions I just described, in multiple languages. Try to keep them short and concise, and, to the best possible extent, related and personalised to the contents of the menu. It's very important that the generated prompts can be safely answered with the information present in the menu."
+    output_schema = {
+        "name": "language_options_response",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "languages": {
+                    "type": "array",
+                    "minItems": 10,
+                    "maxItems": 10,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "language_code": {
+                                "type": "string",
+                                "enum": [
+                                    "en",
+                                    "es",
+                                    "fr",
+                                    "de",
+                                    "it",
+                                    "zh",
+                                    "ja",
+                                    "ru",
+                                    "pt",
+                                    "nl",
+                                ],
+                            },
+                            "options": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 3,
+                                "maxItems": 3,
+                            },
+                        },
+                        "required": ["language_code", "options"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["languages"],
+            "additionalProperties": False,
+        },
+    }
+    subdir_name = "options-generator"
+
+    def __init__(self) -> None:
+        self.deployment = "recepcionista"
+        self.llm_caller = OpenaiCaller(
+            deployment_name=self.deployment,
+            system_prompt=self.system_prompt,
+            output_schema=self.output_schema,
+        )
+        self.n_retries = 4
+
+    def generate(self, contents: str) -> tuple[str | None, dict]:
+        self.save_prompt()
+        print("Extracting UI options...")
+
+        call_metadata = {
+            "prompt_hash": self.prompt_hash,
+            "prompt_storage_location": self.prompt_storage_location,
+            "deployment": self.deployment,
+        }
+        for _ in range(self.n_retries):
+            try:
+                messages = [{"role": "user", "content": contents}]
+                raw_resp = self.llm_caller(messages)
+                r = json.loads(raw_resp)
+                return r, call_metadata
+            except json.JSONDecodeError:
+                print(
+                    f"JSON decoding failed for ui options generation. Retrying (max={self.n_retries}"
+                )
+                pass
+
+        return None, call_metadata
+
+
 class ContentValidator(PromptUser):
     system_prompt = "Please tell me whether the following text corresponds to a restaurant or bar menu. Respond with a single { 'is_menu' : boolean } object."
     subdir_name = "content-validator"
 
     def __init__(self) -> None:
-        self.deployment_name = "recepcionista"
+        self.deployment = "recepcionista"
         self.output_schema = {
             "name": "boolean_response",
             "schema": {
@@ -141,26 +222,32 @@ class ContentValidator(PromptUser):
 
         self.llm_caller = OpenaiCaller(
             system_prompt=self.system_prompt,
-            deployment_name=self.deployment_name,
+            deployment_name=self.deployment,
             output_schema=self.output_schema,
         )
         self.n_retries = 3
 
-    def validate_contents(self, contents: str):
+    def validate_contents(self, contents: str) -> tuple[bool, dict]:
         self.save_prompt()
+        print("Validating contents...")
+        call_metadata = {
+            "prompt_hash": self.prompt_hash,
+            "prompt_storage_location": self.prompt_storage_location,
+            "deployment": self.deployment,
+        }
         for _ in range(self.n_retries):
             try:
                 messages = [{"role": "user", "content": contents}]
                 raw_resp = self.llm_caller(messages)
                 resp = json.loads(raw_resp)
-                return resp.get("is_menu")
+                return resp.get("is_menu"), call_metadata
             except json.JSONDecodeError:
                 print(
                     f"JSON decoding failed for menu content validation. Retrying (max={self.n_retries}"
                 )
                 pass
 
-        return False
+        return False, call_metadata
 
 
 class PdfMenuParser(PromptUser):
@@ -174,7 +261,7 @@ class PdfMenuParser(PromptUser):
             deployment_name=self.deployment, system_prompt=self.system_prompt
         )
 
-    def parse_menu_contents(self) -> dict:
+    def parse_menu_contents(self) -> tuple[str, dict]:
         self.save_prompt()
 
         content = []
@@ -194,8 +281,7 @@ class PdfMenuParser(PromptUser):
 
         resp = self.llm_caller(messages)
 
-        return {
-            "menu_content": resp,
+        return resp, {
             "prompt_hash": self.prompt_hash,
             "prompt_storage_location": self.prompt_storage_location,
             "deployment": self.deployment,
