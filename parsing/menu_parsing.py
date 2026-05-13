@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 
 from storage_utils import _get_container_client
-from llm_utils import OpenaiCaller, PdfMenuParser
+from llm_utils import OpenaiCaller, PdfMenuParser, ContentValidator
 
 
 class CustomException(Exception):
@@ -30,40 +30,6 @@ class MenuParsingInProgress(CustomException):
         "The provided source is currently being parsed. Come back in a few minutes!"
     )
     error_code = "PARSING_IN_PROGRESS"
-
-
-def validate_menu_contents(contents: str) -> bool:
-    system_prompt = "Please tell me whether the following text corresponds to a restaurant or bar menu. Respond with a single { 'is_menu' : boolean } object."
-    deployment_name = "recepcionista"
-    output_schema = {
-        "name": "boolean_response",
-        "schema": {
-            "type": "object",
-            "properties": {"is_menu": {"type": "boolean"}},
-            "required": ["is_menu"],
-            "additionalProperties": False,
-        },
-    }
-
-    llm_caller = OpenaiCaller(
-        system_prompt=system_prompt,
-        deployment_name=deployment_name,
-        output_schema=output_schema,
-    )
-    n_retries = 3
-    for _ in range(n_retries):
-        try:
-            messages = [{"role": "user", "content": contents}]
-            raw_resp = llm_caller(messages)
-            resp = json.loads(raw_resp)
-            return resp.get("is_menu")
-        except json.JSONDecodeError:
-            print(
-                f"JSON decoding failed for menu content validation. Retrying (max={n_retries}"
-            )
-            pass
-
-    return False
 
 
 def _hash_local_pdf(filename: str) -> str:
@@ -130,7 +96,8 @@ class MenuParser:
 
     def _validate_contents(self) -> bool:
         contents_str = self._get_contents_jina()
-        is_valid_menu = validate_menu_contents(contents=contents_str)
+        content_validator = ContentValidator()
+        is_valid_menu = content_validator.validate_contents(contents=contents_str)
         if is_valid_menu:
             print("Contents valid!")
         else:
@@ -269,7 +236,6 @@ def get_menu_contents_main(
 
 from dotenv import load_dotenv
 from IPython import embed
-from llm_client import PdfMenuParser
 
 if __name__ == "__main__":
     load_dotenv(".env")
@@ -281,7 +247,7 @@ if __name__ == "__main__":
     pandas_url = "https://pandas.pydata.org/Pandas_Cheat_Sheet.pdf"
 
     try:
-        contents = get_menu_contents_main(pdfurl, overwrite=False)
+        contents = get_menu_contents_main(pdfurl, overwrite=True)
     except CustomException as e:
         print(e.error_message)
 

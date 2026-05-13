@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
 import os
 from typing import Dict, Any, Union
 import json
@@ -91,31 +92,26 @@ def convert_pdf_to_images(
     return resized
 
 
-class PdfMenuParser:
-    system_prompt = "Eres un experto en parsear imagenes de menus de restaurante. A partir del siguiente menu, extrae toda la información que consideres relevante para el comensal del restaurante, en formato JSON. Responde solo con el JSON en cuestión, no añadas texto irrelevante a la tarea. Bajo ningún concepto te inventes información que no aparece claramente en el documento proporcionado."
-    deployment = "gpt-5.4"
-
-    def __init__(self, pdf_source_url: str) -> None:
-        self.pdf_source_url = pdf_source_url
-        self.llm_caller = OpenaiCaller(
-            deployment_name=self.deployment, system_prompt=self.system_prompt
-        )
-        self.prompt_hash = None
-        self.prompt_storage_location = None
+class PromptUser:
+    system_prompt: str
+    prompt_hash: str
+    prompt_storage_location: str
+    subdir_name: str
+    container_name: str = "dammian-mask-system-prompts"
 
     def save_prompt(self) -> None:
         system_prompt_hashed = hashlib.sha256(
             self.system_prompt.encode("utf-8")
         ).hexdigest()
-        container = _get_container_client(container_name="dammian-mask-system-prompts")
-        blob_name = "pdf-parsing/" + system_prompt_hashed + ".json"
+        container = _get_container_client(container_name=self.container_name)
+        blob_name = self.subdir_name + "/" + system_prompt_hashed + ".json"
 
         self.prompt_hash = system_prompt_hashed
         self.prompt_storage_location = blob_name
 
         blob = container.get_blob_client(blob=blob_name)
         if blob.exists():
-            print("Prompt already exists.")
+            print(f"Prompt already exists for {self.subdir_name}.")
             return
 
         data = {
@@ -125,6 +121,58 @@ class PdfMenuParser:
         }
 
         blob.upload_blob(data=json.dumps(data, indent=2), overwrite=True)
+
+
+class ContentValidator(PromptUser):
+    system_prompt = "Please tell me whether the following text corresponds to a restaurant or bar menu. Respond with a single { 'is_menu' : boolean } object."
+    subdir_name = "content-validator"
+
+    def __init__(self) -> None:
+        self.deployment_name = "recepcionista"
+        self.output_schema = {
+            "name": "boolean_response",
+            "schema": {
+                "type": "object",
+                "properties": {"is_menu": {"type": "boolean"}},
+                "required": ["is_menu"],
+                "additionalProperties": False,
+            },
+        }
+
+        self.llm_caller = OpenaiCaller(
+            system_prompt=self.system_prompt,
+            deployment_name=self.deployment_name,
+            output_schema=self.output_schema,
+        )
+        self.n_retries = 3
+
+    def validate_contents(self, contents: str):
+        self.save_prompt()
+        for _ in range(self.n_retries):
+            try:
+                messages = [{"role": "user", "content": contents}]
+                raw_resp = self.llm_caller(messages)
+                resp = json.loads(raw_resp)
+                return resp.get("is_menu")
+            except json.JSONDecodeError:
+                print(
+                    f"JSON decoding failed for menu content validation. Retrying (max={self.n_retries}"
+                )
+                pass
+
+        return False
+
+
+class PdfMenuParser(PromptUser):
+    system_prompt = "Eres un experto en parsear imagenes de menus de restaurante. A partir del siguiente menu, extrae toda la información que consideres relevante para el comensal del restaurante, en formato JSON. Responde solo con el JSON en cuestión, no añadas texto irrelevante a la tarea. Bajo ningún concepto te inventes información que no aparece claramente en el documento proporcionado."
+    deployment = "gpt-5.4"
+    subdir_name = "pdf-parser"
+
+    def __init__(self, pdf_source_url: str) -> None:
+        self.pdf_source_url = pdf_source_url
+        self.llm_caller = OpenaiCaller(
+            deployment_name=self.deployment, system_prompt=self.system_prompt
+        )
 
     def parse_menu_contents(self) -> dict:
         self.save_prompt()
