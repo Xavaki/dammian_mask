@@ -19,6 +19,8 @@ from datetime import datetime
 import requests
 import hashlib
 
+from .utils import language_code_to_default_chat_options
+
 # import logging
 # logging.basicConfig(level=logging.INFO)
 # logging.getLogger("azure.identity").setLevel(logging.DEBUG)
@@ -81,6 +83,7 @@ bp = Blueprint("v1", __name__, url_prefix="/api")
 #
 #
 #
+#
 
 
 @bp.route("/get-menu-contents-status", methods=["GET"])
@@ -101,27 +104,40 @@ def get_menu_contents_status():
         menu_hash = hash_menu_contents(menu_source_identifier=menu_source)
 
     headers = request.headers
-    for k, v in headers.items():
-        print(f"{k}:{v}")
     browser_language = request.accept_languages.best
     browser_language_code = browser_language.split("-")[0] if browser_language else "es"
-    print(browser_language_code)
 
     CONTAINER_NAME = "dammian-mask-menus"
     container = _get_container_client(container_name=CONTAINER_NAME)
     blob_name = menu_hash + "/contents.json"
     blob = container.get_blob_client(blob=blob_name)
 
+    response_data = {"status": "UNKNOWN", "menu_hash": menu_hash, "ui": None}
     if not blob.exists():
         # TODO: launch parsing job
-        response_data = {"status": "PARSING", "menu_hash": menu_hash}
+        status = "PARSING"
     else:
-        blob_data = json.loads(blob.download_blob().readall().decode("utf-8"))
-        is_valid_menu = blob_data.get("is_valid_menu")
+        menu_data = json.loads(blob.download_blob().readall().decode("utf-8"))
+        is_valid_menu = menu_data.get("is_valid_menu")
+        ui_options = menu_data.get("menu_data", {}).get("ui_options")
+        language_ui_options = [
+            x for x in ui_options if x.get("language_code") == browser_language_code
+        ]
+        language_ui_options = (
+            language_ui_options[0]
+            if language_ui_options
+            else {"language_code": browser_language_code}
+        )
+        language_ui_options["placeholders"] = language_code_to_default_chat_options[
+            browser_language_code
+        ]
+        response_data["ui"] = language_ui_options
         if is_valid_menu:
-            response_data = {"status": "COMPLETED", "menu_hash": menu_hash}
+            status = "COMPLETED"
         else:
-            response_data = {"status": "INVALID_MENU", "menu_hash": menu_hash}
+            status = "INVALID_MENU"
+
+    response_data["status"] = status
 
     return jsonify(response_data)
 
@@ -140,12 +156,14 @@ def menu_speak():
 
     CONTAINER_NAME = "dammian-mask-menus"
     container = _get_container_client(container_name=CONTAINER_NAME)
-    blob_name = menu_hash + ".json"
+    blob_name = menu_hash + "/contents.json"
     blob = container.get_blob_client(blob=blob_name)
     assert blob.exists()
 
-    menu_contents = json.loads(blob.download_blob().readall().decode("utf-8")).get(
-        "menu_content"
+    menu_contents = (
+        json.loads(blob.download_blob().readall().decode("utf-8"))
+        .get("menu_data", {})
+        .get("menu_content")
     )
 
     oc = OpenaiCaller(

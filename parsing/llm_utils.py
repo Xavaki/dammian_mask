@@ -194,7 +194,7 @@ class UiOptionsGenerator(PromptUser):
                 messages = [{"role": "user", "content": contents}]
                 raw_resp = self.llm_caller(messages)
                 r = json.loads(raw_resp)
-                return r, call_metadata
+                return r["languages"], call_metadata
             except json.JSONDecodeError:
                 print(
                     f"JSON decoding failed for ui options generation. Retrying (max={self.n_retries}"
