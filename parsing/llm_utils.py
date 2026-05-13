@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+import os
+from typing import Dict, Any, Union
+import json
+import requests
+
+from datetime import datetime
+from storage_utils import _get_container_client
+
+import hashlib
+import base64
+
+from PIL import Image
+from io import BytesIO
+from pdf2image import convert_from_bytes
+
+
+class OpenaiCaller:
+    def __init__(
+        self,
+        deployment_name: str,
+        system_prompt: str,
+        output_schema: dict | None = None,
+    ) -> None:
+        self.deployment_name = deployment_name
+        self.system_prompt = system_prompt
+        self.output_schema = output_schema
+
+        self.ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
+        self.API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
+        self.API_VERSION = os.environ["AZURE_OPENAI_API_VERSION"]
+
+    def __call__(self, messages: list) -> str:
+        full_messages = [{"role": "system", "content": self.system_prompt}] + messages
+
+        payload_args = {"messages": full_messages}
+        if self.output_schema:
+            payload_args["response_format"] = {
+                "type": "json_schema",
+                "json_schema": self.output_schema,
+            }
+
+        payload = {**payload_args}
+
+        url = f"{self.ENDPOINT}/openai/deployments/{self.deployment_name}/chat/completions?api-version={self.API_VERSION}"
+        r = requests.post(
+            url,
+            headers={"Content-Type": "application/json", "api-key": self.API_KEY},
+            json=payload,
+            timeout=60,
+        )
+        r.raise_for_status()
+        response = r.json()
+        response_message_raw = response["choices"][0]["message"]["content"]
+        return response_message_raw
+
+
+def image_to_data_url(image: Image.Image) -> str:
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+    image_bytes = buf.getvalue()
+    mime_type = "image/png"
+    base64_encoded_data = base64.b64encode(image_bytes).decode("utf-8")
+    # Construct the data URL
+    return f"data:{mime_type};base64,{base64_encoded_data}"
+
+
+def convert_pdf_to_images(
+    pdf_source_url: str, resize_factor: float = 1.0
+) -> list[Image.Image]:
+    print("Image resizing factor:", resize_factor)
+    resp = requests.get(pdf_source_url)
+    resp.raise_for_status()
+    pdf_bytes = resp.content
+    imgs = convert_from_bytes(pdf_bytes, fmt="PNG")
+    print("PDF converted to images")
+
+    if resize_factor == 1.0:
+        return imgs
+
+    resized = []
+    for img in imgs:
+        w, h = img.size
+        resized_img = img.resize(
+            (int(w * resize_factor), int(h * resize_factor)),
+            Image.Resampling.LANCZOS,
+        )
+        resized.append(resized_img)
+
+    return resized
+
+
+class PdfMenuParser:
+    system_prompt = "Eres un experto en parsear imagenes de menus de restaurante. A partir del siguiente menu, extrae toda la información que consideres relevante para el comensal del restaurante, en formato JSON. Responde solo con el JSON en cuestión, no añadas texto irrelevante a la tarea. Bajo ningún concepto te inventes información que no aparece claramente en el documento proporcionado."
+    deployment = "gpt-5.4"
+
+    def __init__(self, pdf_source_url: str) -> None:
+        self.pdf_source_url = pdf_source_url
+        self.llm_caller = OpenaiCaller(
+            deployment_name=self.deployment, system_prompt=self.system_prompt
+        )
+        self.prompt_hash = None
+        self.prompt_storage_location = None
+
+    def save_prompt(self) -> None:
+        system_prompt_hashed = hashlib.sha256(
+            self.system_prompt.encode("utf-8")
+        ).hexdigest()
+        container = _get_container_client(container_name="dammian-mask-system-prompts")
+        blob_name = "pdf-parsing/" + system_prompt_hashed + ".json"
+
+        self.prompt_hash = system_prompt_hashed
+        self.prompt_storage_location = blob_name
+
+        blob = container.get_blob_client(blob=blob_name)
+        if blob.exists():
+            print("Prompt already exists.")
+            return
+
+        data = {
+            "prompt": self.system_prompt,
+            "prompt_hash": system_prompt_hashed,
+            "timestamp": str(datetime.now()),
+        }
+
+        blob.upload_blob(data=json.dumps(data, indent=2), overwrite=True)
+
+    def parse_menu_contents(self) -> dict:
+        self.save_prompt()
+
+        content = []
+        pdf_images = convert_pdf_to_images(
+            pdf_source_url=self.pdf_source_url, resize_factor=0.8
+        )
+        for image in pdf_images:
+            image_base64_encoded = image_to_data_url(image=image)
+            content.append({"type": "image_url", "image_url": image_base64_encoded})
+
+        messages = [
+            {
+                "role": "user",
+                "content": content,
+            },
+        ]
+
+        resp = self.llm_caller(messages)
+
+        return {
+            "menu_content": resp,
+            "prompt_hash": self.prompt_hash,
+            "prompt_storage_location": self.prompt_storage_location,
+            "deployment": self.deployment,
+        }

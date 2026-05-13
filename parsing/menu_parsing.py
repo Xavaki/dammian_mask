@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 
 from storage_utils import _get_container_client
-from llm_client import OpenaiCaller
+from llm_utils import OpenaiCaller, PdfMenuParser
 
 
 class CustomException(Exception):
@@ -53,8 +53,8 @@ def validate_menu_contents(contents: str) -> bool:
     n_retries = 3
     for _ in range(n_retries):
         try:
-            message = {"role": "user", "content": contents}
-            raw_resp = llm_caller(message)
+            messages = [{"role": "user", "content": contents}]
+            raw_resp = llm_caller(messages)
             resp = json.loads(raw_resp)
             return resp.get("is_menu")
         except json.JSONDecodeError:
@@ -122,17 +122,14 @@ class MenuParser:
         return response.text
 
     def _parse_pdf(self) -> dict:
-        jina_contents = self._get_contents_jina()
-        return {"menu_items": jina_contents}
+        parser = PdfMenuParser(pdf_source_url=self.menu_source_identifier)
+        return parser.parse_menu_contents()
 
     def _parse_website(self) -> dict:
         raise WebsiteUrlError("Website menu not supported yet")
 
-    def _validate_contents(self, contents: dict) -> bool:
-        contents_str = contents["menu_items"]
-        if isinstance(type(contents_str), dict):
-            contents_str = json.loads(contents_str, indent=2)
-
+    def _validate_contents(self) -> bool:
+        contents_str = self._get_contents_jina()
         is_valid_menu = validate_menu_contents(contents=contents_str)
         if is_valid_menu:
             print("Contents valid!")
@@ -142,13 +139,16 @@ class MenuParser:
         return is_valid_menu
 
     def parse(self) -> tuple[dict, bool]:
-        if self.is_pdf:
-            contents = self._parse_pdf()
-        else:
-            contents = self._parse_website()
+        valid_contents = self._validate_contents()
 
-        print("Contents parsed!")
-        valid_contents = self._validate_contents(contents)
+        contents = None
+        if valid_contents:
+            if self.is_pdf:
+                contents = self._parse_pdf()
+            else:
+                contents = self._parse_website()
+
+            print("Contents parsed!")
 
         return contents, valid_contents
 
@@ -201,21 +201,25 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
             return data
         print("Overwrite is set to True. Overwritting.")
 
+    menu_parser = MenuParser(menu_source_identifier=menu_source_identifier)
+    is_pdf = menu_parser.is_pdf
+    document_type = "pdf" if is_pdf else "website"
+
     # THIS AVOIDS SIMULTANEOUS PARSING OF THE SAME DATA
     pre_parsing_menu_contents_metadata = {
-        "menu_content": None,
+        "menu_data": None,
         "timestamp": None,
         "menu_source_identifier": menu_source_identifier,
         "menu_hash": menu_hash,
         "is_valid_menu": None,
         "status": "PARSING",
+        "document_type": document_type,
     }
     blob.upload_blob(
         data=json.dumps(pre_parsing_menu_contents_metadata, indent=4), overwrite=True
     )
     _upload_document(menu_hash, menu_source_identifier)
 
-    menu_parser = MenuParser(menu_source_identifier=menu_source_identifier)
     try:
         menu_contents, contents_are_valid = menu_parser.parse()
         status = "COMPLETED"
@@ -223,14 +227,15 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
         menu_contents = None
         contents_are_valid = None
         status = "UNKNOWN"
+
     menu_contents_metadata = {
-        "menu_content": menu_contents,
+        "menu_data": menu_contents,
         "timestamp": str(datetime.now()),
         "menu_source_identifier": menu_source_identifier,
         "menu_hash": menu_hash,
         "is_valid_menu": contents_are_valid,
         "status": status,
-        "document_type": "pdf" if _is_pdf(menu_source_identifier) else "website",
+        "document_type": document_type,
     }
     blob.upload_blob(data=json.dumps(menu_contents_metadata, indent=4), overwrite=True)
     print(f"Uploaded contents for {menu_source_identifier}")
@@ -250,7 +255,7 @@ def _get_menu_contents(menu_source_identifier: str, overwrite: bool) -> dict:
     if not menu_contents_metadata["is_valid_menu"]:
         raise InvalidMenuContentsError
 
-    return menu_contents_metadata["menu_content"]
+    return menu_contents_metadata["menu_data"]["menu_content"]
 
 
 def get_menu_contents_main(
@@ -264,17 +269,20 @@ def get_menu_contents_main(
 
 from dotenv import load_dotenv
 from IPython import embed
+from llm_client import PdfMenuParser
 
 if __name__ == "__main__":
     load_dotenv(".env")
 
     pdfurl = "https://www.restaurantestevet.com/wp-content/uploads/CartaESTEVEThivern24web.pdf"
+
     menu_url = "https://www.restaurantestevet.com/en/menu/"
     wurl = "https://dl.dropboxusercontent.com/scl/fi/l8lkbhnzk480zglfaemye/Carta_ramenyahiro.pdf?rlkey=cpqvk6vptk65l0377o37d81im&st=32ln77tt&"
     pandas_url = "https://pandas.pydata.org/Pandas_Cheat_Sheet.pdf"
 
     try:
-        contents = get_menu_contents_main(pdfurl, overwrite=True)
+        contents = get_menu_contents_main(pdfurl, overwrite=False)
     except CustomException as e:
         print(e.error_message)
+
     embed()
