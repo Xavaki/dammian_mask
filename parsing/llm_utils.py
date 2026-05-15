@@ -251,7 +251,7 @@ class ContentValidator(PromptUser):
 
 
 class PdfMenuParser(PromptUser):
-    system_prompt = "Eres un experto en parsear imagenes de menus de restaurante. A partir del siguiente menu, extrae toda la información que consideres relevante para el comensal del restaurante, en formato JSON. Responde solo con el JSON en cuestión, no añadas texto irrelevante a la tarea. Bajo ningún concepto te inventes información que no aparece claramente en el documento proporcionado."
+    system_prompt = "Eres un experto en parsear imagenes de menus de restaurante. A partir del siguiente menu, extrae toda la información que consideres relevante para el comensal del restaurante, en formato JSON. Responde solo con el JSON en cuestión, no añadas texto irrelevante a la tarea. Bajo ningún concepto te inventes información que no aparece claramente en el documento proporcionado. Debes asegurarte que cualquier información acerca de los contenidos del plato (eg gluten-free, vegan-friendly, etc.) queda bién representada en tu respuesta"
     deployment = "gpt-5.4"
     subdir_name = "pdf-parser"
 

@@ -21,14 +21,11 @@ class OpenaiCaller:
         self.API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
         self.API_VERSION = os.environ["AZURE_OPENAI_API_VERSION"]
 
-    def __call__(self, message: str) -> str:
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": message},
-        ]
+    def __call__(self, messages: list) -> str:
+        full_messages = [{"role": "system", "content": self.system_prompt}] + messages
 
         payload_args = {
-            "messages": messages,
+            "messages": full_messages,
         }
         if self.output_schema:
             payload_args["response_format"] = {
@@ -50,13 +47,12 @@ class OpenaiCaller:
         response_message_raw = response["choices"][0]["message"]["content"]
         return response_message_raw
 
-    def stream(self, message: str) -> str:
-        messages = [
+    def stream(self, messages: list) -> str:
+        full_messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": message},
-        ]
+        ] + messages
 
-        payload_args = {"messages": messages, "stream": True}
+        payload_args = {"messages": full_messages, "stream": True}
         if self.output_schema:
             payload_args["response_format"] = {
                 "type": "json_schema",
