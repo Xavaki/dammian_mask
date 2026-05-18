@@ -241,7 +241,10 @@ def get_menu_contents_status():
                 400,
             )
 
-        menu_hash = hash_menu_contents(menu_source_identifier=menu_source)
+        try:
+            menu_hash = hash_menu_contents(menu_source_identifier=menu_source)
+        except:
+            return jsonify({"status": "INVALID_MENU", "menu_hash": None})
 
     headers = request.headers
     browser_language = request.accept_languages.best
@@ -308,6 +311,7 @@ def menu_speak():
         .get("menu_data", {})
         .get("menu_content")
     )
+    print(menu_contents)
     session_manager = SessionConversationManager(session_id=session_id)
     system_prompt = session_manager.get_session_system_prompt()
     full_system_prompt = (
