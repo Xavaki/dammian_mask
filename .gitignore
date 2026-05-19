@@ -1,5 +1,5 @@
 *.pdf
-.env
+.env*
 
 # Source - https://stackoverflow.com/a/14058267
 # Posted by seanrose, modified by community. See post 'Timeline' for change history

@@ -228,7 +228,7 @@ def _get_menu_contents_metadata(menu_source_identifier: str, overwrite: bool) ->
     return menu_contents_metadata
 
 
-def get_menu_data(menu_source_identifier: str, overwrite: bool) -> dict:
+def get_upload_menu_data(menu_source_identifier: str, overwrite: bool) -> dict:
     menu_contents_metadata = _get_menu_contents_metadata(
         menu_source_identifier=menu_source_identifier, overwrite=overwrite
     )
@@ -257,7 +257,7 @@ if __name__ == "__main__":
     pandas_url = "https://pandas.pydata.org/Pandas_Cheat_Sheet.pdf"
 
     try:
-        menu_data = get_menu_data(pdfurl, overwrite=True)
+        menu_data = get_upload_menu_data(pdfurl, overwrite=True)
     except CustomException as e:
         print(e.error_message)
 

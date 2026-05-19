@@ -1,0 +1,7 @@
+azure-identity
+azure-storage-blob
+azure-storage-queue
+python-dotenv
+pillow
+pdf2image
+ipython
